@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core'
+import { Component, OnInit } from '@angular/core'
 import { Router, ActivatedRoute } from '@angular/router'
 import { map } from 'rxjs/operators'
 
@@ -78,16 +78,6 @@ enum LeasesSearchStatus {
     ],
 })
 export class LeaseSearchPageComponent implements OnInit {
-    private route = inject(ActivatedRoute)
-    private router = inject(Router)
-    private msgService = inject(MessageService)
-
-    /**
-     * Service used to contact the DHCP servers.
-     * @private
-     */
-    private dhcpApi = inject(DHCPService)
-
     public Status = LeasesSearchStatus
 
     breadcrumbs = [{ label: 'DHCP' }, { label: 'Lease Search' }]
@@ -143,6 +133,18 @@ export class LeaseSearchPageComponent implements OnInit {
     erredDaemons: LeasesSearchErredDaemon[]
 
     /**
+     * Component constructor.
+     *
+     * @param dhcpApi service used to contact the DHCP servers.
+     */
+    constructor(
+        private route: ActivatedRoute,
+        private router: Router,
+        private msgService: MessageService,
+        private dhcpApi: DHCPService
+    ) {}
+
+    /**
      * Hook displayed during component initialization.
      *
      * It uses a text query parameter value to perform leases search.
@@ -190,14 +192,56 @@ export class LeaseSearchPageComponent implements OnInit {
         this.searchStatus = this.Status.Searching
         this.leases = []
         this.erredDaemons = []
-        this.dhcpApi
+        if (searchText.indexOf("*") > 0) {
+	    for (let i = 1; i < 255; i++) {
+		const searchTextNew = searchText.replace("*", String(i));
+                this.dhcpApi
+                    .getLeases(searchTextNew)
+                    .pipe(
+                        // Leases are fetched from Kea servers directly and they lack
+                        // unique identifiers. The unique identifiers are required as
+                        // the data keys in the expandable table.
+                        map((data) => {
+                            if (data.items) {
+                                // For each returned lease assign a unique id.
+                                for (const lease of data.items) {
+				    lease.id = i
+				}
+                            }
+                            return data
+                        })
+                    )
+                    .subscribe(
+                        (data) => {
+                            // Fetching leases successful.
+                            this.leases = [...this.leases, ...data.items]
+			    this.leases = this.leases.sort((l, p) => Number(l.ipAddress.split(".")[3]) > Number(p.ipAddress.split(".")[3]) ? 1 : -1)
+                            this.erredDaemons = data.erredDaemons
+                            this.searchStatus = this.Status.Searched
+                        },
+                        (err) => {
+                            // Fetching leases erred.
+                            const msg = getErrorMessage(err)
+                            this.msgService.add({
+                                severity: 'error',
+                                summary: 'Error searching leases',
+                                detail: 'Error searching leases for ' + searchText + ' : ' + msg,
+                                life: 10000,
+                            })
+
+                            this.searchStatus = this.Status.Searched
+                        }
+                    )
+            }
+        } else {
+            this.dhcpApi
             .getLeases(searchText)
             .pipe(
                 // Leases are fetched from Kea servers directly and they lack
                 // unique identifiers. The unique identifiers are required as
                 // the data keys in the expandable table.
                 map((data) => {
-                    if (data.items) {
+                    if (data.items) { 
                         // For each returned lease assign a unique id.
                         let id = 1
                         for (const lease of data.items) {
@@ -208,7 +252,7 @@ export class LeaseSearchPageComponent implements OnInit {
                     return data
                 })
             )
-            .subscribe(
+            .subscribe(  
                 (data) => {
                     // Fetching leases successful.
                     this.leases = data.items
@@ -224,14 +268,16 @@ export class LeaseSearchPageComponent implements OnInit {
                         detail: 'Error searching leases for ' + searchText + ' : ' + msg,
                         life: 10000,
                     })
-
+     
                     this.leases = []
                     this.erredDaemons = []
                     this.searchStatus = this.Status.Searched
                 }
             )
-    }
 
+        }
+    }
+    
     /**
      * Event handler triggered when a key is pressed with a search box.
      *
@@ -287,9 +333,9 @@ export class LeaseSearchPageComponent implements OnInit {
      * @returns State name.
      */
     leaseStateAsText(state) {
-        if (!state) {
-            return 'Valid'
-        }
+//        if (!state) {
+//            return 'Valid'
+//        }
         switch (state) {
             case 0: {
                 return 'Valid'
